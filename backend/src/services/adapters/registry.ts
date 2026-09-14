@@ -5,7 +5,9 @@
 import { OpenAIImageAdapter } from './openai-image'
 import { GeminiImageAdapter } from './gemini-image'
 import { VolcEngineImageAdapter } from './volcengine-image'
+import { AgentPlanImageAdapter } from './agentplan-image'
 import { VolcEngineVideoAdapter } from './volcengine-video'
+import { AgentPlanVideoAdapter } from './agentplan-video'
 import { MiniMaxVideoAdapter } from './minimax-video'
 import { AliyunWanVideoAdapter } from './aliyun-wan-video'
 import type { ImageProviderAdapter, VideoProviderAdapter } from './types'
@@ -15,11 +17,13 @@ export const imageAdapters: Record<string, ImageProviderAdapter> = {
   openai: new OpenAIImageAdapter(),
   gemini: new GeminiImageAdapter(),
   volcengine: new VolcEngineImageAdapter(),
+  agentplan: new AgentPlanImageAdapter(),
 }
 
 // 视频 Adapter 注册表
 export const videoAdapters: Record<string, VideoProviderAdapter> = {
   volcengine: new VolcEngineVideoAdapter(),
+  agentplan: new AgentPlanVideoAdapter(),
   minimax: new MiniMaxVideoAdapter(),
   aliyun: new AliyunWanVideoAdapter(),
 }

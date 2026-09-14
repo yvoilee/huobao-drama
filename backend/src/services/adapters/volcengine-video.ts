@@ -37,10 +37,19 @@ function parseUrlArray(raw?: string | null): string[] {
 export class VolcEngineVideoAdapter implements VideoProviderAdapter {
   provider = 'volcengine'
 
+  /** 方舟接口前缀：普通方舟 /api/v3，AgentPlan 企业版 /api/plan/v3（子类覆写） */
+  protected apiPrefix = '/api/v3'
+
+  /** 默认模型 */
+  protected defaultModel = DEFAULT_MODEL
+
+  /** 支持的模型前缀；AgentPlan 子类覆写以兼容其模型命名空间（dot 命名 doubao-seedance-2.0） */
+  protected modelPrefixes: string[] = [SEEDANCE2_MODEL_PREFIX]
+
   buildGenerateRequest(config: AIConfig, record: VideoGenerationRecord): ProviderRequest {
-    const model = record.model || config.model || DEFAULT_MODEL
-    if (!model.startsWith(SEEDANCE2_MODEL_PREFIX)) {
-      throw new Error(`仅支持 Seedance 2.0 系列模型（${SEEDANCE2_MODEL_PREFIX}-*），当前: ${model}`)
+    const model = record.model || config.model || this.defaultModel
+    if (!this.modelPrefixes.some((p) => model.startsWith(p))) {
+      throw new Error(`仅支持 Seedance 系列模型（${this.modelPrefixes.join(' / ')}*），当前: ${model}`)
     }
 
     const prompt = (record.prompt || '').trim()
@@ -82,7 +91,7 @@ export class VolcEngineVideoAdapter implements VideoProviderAdapter {
     }
 
     return {
-      url: joinProviderUrl(config.baseUrl, '/api/v3', '/contents/generations/tasks'),
+      url: joinProviderUrl(config.baseUrl, this.apiPrefix, '/contents/generations/tasks'),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -106,7 +115,7 @@ export class VolcEngineVideoAdapter implements VideoProviderAdapter {
 
   buildPollRequest(config: AIConfig, taskId: string): ProviderRequest {
     return {
-      url: joinProviderUrl(config.baseUrl, '/api/v3', `/contents/generations/tasks/${taskId}`),
+      url: joinProviderUrl(config.baseUrl, this.apiPrefix, `/contents/generations/tasks/${taskId}`),
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${config.apiKey}`,
