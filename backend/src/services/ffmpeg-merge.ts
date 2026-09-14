@@ -2,6 +2,7 @@
  * FFmpeg 多镜头拼接 — 将所有生成后的镜头视频拼接为一集
  */
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { v4 as uuid } from 'uuid'
 import { db, getInsertId, schema } from '../db/index.js'
@@ -17,6 +18,10 @@ function toAbsPath(relativePath: string): string {
   if (relativePath.startsWith('static/')) return path.join(DATA_ROOT, relativePath)
   return path.join(STORAGE_ROOT, relativePath)
 }
+
+// 片头（剧名）/片尾（「剧终」）黑底白字卡的固定时长（秒）
+const TITLE_CARD_SECONDS = 3
+const END_CARD_SECONDS = 2
 
 /**
  * 拼接一集的镜头视频。
@@ -57,7 +62,12 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
 
   const videos = clips.map(c => c.url)
 
-  logTaskStart('MergeTask', 'episode-merge', { episodeId, dramaId, clips: videos.length })
+  // 片头使用剧名（始终固定，不依赖前端配置）
+  const [drama] = await db.select({ title: schema.dramas.title })
+    .from(schema.dramas).where(eq(schema.dramas.id, dramaId))
+  const dramaTitle = drama?.title
+
+  logTaskStart('MergeTask', 'episode-merge', { episodeId, dramaId, clips: videos.length, title: dramaTitle })
 
   // 创建 merge 记录
   const ts = now()
@@ -74,7 +84,7 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
   const mergeId = getInsertId(res)
 
   // 异步执行
-  doMerge(mergeId, episodeId, videos).catch(async err => {
+  doMerge(mergeId, episodeId, videos, dramaTitle).catch(async err => {
     logTaskError('MergeTask', 'episode-merge', { mergeId, episodeId, error: err.message })
     console.error(`[Merge] Failed:`, err)
     await db.update(schema.videoMerges)
@@ -85,54 +95,173 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
   return mergeId
 }
 
-async function doMerge(mergeId: number, episodeId: number, videos: string[]) {
-  // 生成 concat 列表文件
-  const listDir = path.join(STORAGE_ROOT, 'temp')
-  fs.mkdirSync(listDir, { recursive: true })
-  const listPath = path.join(listDir, `${uuid()}.txt`)
+/** 探测单个视频的音轨与视频时长：concat filter 要求每段流数一致，无音轨需补静音 */
+interface MediaProbe {
+  hasAudio: boolean
+  videoDuration: number
+  width: number
+  height: number
+  frameRate: string
+}
 
-  const listContent = videos
-    .map(v => `file '${toAbsPath(v)}'`)
-    .join('\n')
-  fs.writeFileSync(listPath, listContent, 'utf-8')
+function probeMedia(filePath: string): Promise<MediaProbe> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) { resolve({ hasAudio: false, videoDuration: 0, width: 0, height: 0, frameRate: '24/1' }); return }
+      const streams = metadata.streams || []
+      const hasAudio = streams.some(s => s.codec_type === 'audio')
+      const video = streams.find(s => s.codec_type === 'video')
+      const videoDuration = Number(video?.duration ?? metadata.format?.duration ?? 0)
+      resolve({
+        hasAudio,
+        videoDuration,
+        width: Number(video?.width ?? 0),
+        height: Number(video?.height ?? 0),
+        frameRate: video?.r_frame_rate ?? video?.avg_frame_rate ?? '24/1',
+      })
+    })
+  })
+}
 
+/** 解析本机可用的中文字体（drawtext 渲染片头/片尾字幕卡用）；找不到返回 null，跳过字幕卡 */
+function resolveCjkFont(): string | null {
+  const candidates = [
+    // macOS
+    '/System/Library/Fonts/PingFang.ttc',
+    '/System/Library/Fonts/Hiragino Sans GB.ttc',
+    '/System/Library/Fonts/STHeiti Medium.ttc',
+    '/System/Library/Fonts/STHeiti Light.ttc',
+    '/System/Library/Fonts/Supplemental/Songti.ttc',
+    // Windows
+    'C:\\Windows\\Fonts\\msyh.ttc',
+    'C:\\Windows\\Fonts\\msyh.ttf',
+    'C:\\Windows\\Fonts\\simhei.ttf',
+    // Linux
+    '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+    '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
+    '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+    '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+  ]
+  return candidates.find(fs.existsSync) ?? null
+}
+
+/** drawtext 过滤器值中的 `:` `,` `'` `\` 需转义（路径、文件名可能含特殊字符） */
+function escFilterValue(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/,/g, '\\,')
+}
+
+/**
+ * 生成一张黑底白字卡（片头/片尾）的 filter 片段。
+ * 文字经 textfile 读取，规避 drawtext 对中文与特殊字符的转义难题。
+ * 分辨率/帧率取首个镜头实际值，保证 concat 各段参数一致。
+ */
+function cardFilter(textFile: string, fontFile: string, seconds: number, width: number, height: number, frameRate: string) {
+  const fontsize = Math.max(28, Math.round(height * 0.09))
+  const video = `color=c=black:s=${width}x${height}:r=${frameRate}:d=${seconds},` +
+    `drawtext=textfile=${escFilterValue(textFile)}:fontfile=${escFilterValue(fontFile)}:fontsize=${fontsize}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2,` +
+    `format=yuv420p,setpts=PTS-STARTPTS`
+  // 与镜头音轨统一为 48kHz 立体声 fltp，保证 concat 各段格式一致
+  const audio = `anullsrc=r=48000:cl=stereo:d=${seconds},aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS`
+  return { video, audio }
+}
+
+async function doMerge(mergeId: number, episodeId: number, videos: string[], title?: string) {
   // 输出文件
   const outputDir = path.join(STORAGE_ROOT, 'merged')
   fs.mkdirSync(outputDir, { recursive: true })
   const outputFilename = `${uuid()}.mp4`
   const outputPath = path.join(outputDir, outputFilename)
 
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg()
-      .input(listPath)
-      .inputOptions(['-f', 'concat', '-safe', '0'])
-      .outputOptions([
-        '-fflags', '+genpts',
-        '-c:v', 'libx264',
-        '-preset', 'medium',
-        '-crf', '23',
-        '-c:a', 'aac',
-        '-ar', '48000',
-        '-b:a', '192k',
-        '-movflags', '+faststart',
-      ])
-      .output(outputPath)
-      .on('end', () => resolve())
-      .on('error', (err) => reject(err))
-      .run()
+  const abs = videos.map(toAbsPath)
+  const n = abs.length
 
-  })
+  // 逐条探测音轨与视频时长：concat filter 要求每段音视频流数一致，无音轨的镜头补一段静音
+  const probes = await Promise.all(abs.map(probeMedia))
 
-  // 清理临时文件
-  fs.unlinkSync(listPath)
+  // 片头（剧名）+ 片尾（「剧终」）黑底白字卡：找不到中文字体则整体跳过，不影响拼接
+  const titleText = title?.trim()
+  const font = resolveCjkFont()
+  if (!font) console.warn('[Merge] 本机未找到中文字体，跳过片头/片尾字幕卡')
+
+  // 字幕卡分辨率/帧率取首个镜头实际值，保证 concat 各段参数一致
+  const first = probes[0]
+  const cardW = first.width || 1280
+  const cardH = first.height || 720
+  const cardFps = first.frameRate || '24/1'
+
+  // 字幕文本写入临时 UTF-8 文件；合并后统一清理
+  const tempDir = font ? fs.mkdtempSync(path.join(os.tmpdir(), 'hb-drawtext-')) : ''
+  const writeTextFile = (name: string, content: string) => {
+    const file = path.join(tempDir, name)
+    fs.writeFileSync(file, content, 'utf8')
+    return file
+  }
+
+  // 用 concat filter（而非 concat demuxer）逐条独立解码：各镜头采样率/编码参数不一致时
+  // （如 Seedance 部分镜头 44100Hz、其余 32000Hz），demuxer 会按首个镜头参数误读后续音轨，
+  // 导致音画漂移；filter 逐条解码 + aresample/aformat 统一到 48k 立体声 fltp 可根治。
+  const cmd = ffmpeg()
+  abs.forEach(p => cmd.input(p))
+
+  const chains: string[] = []
+  const vLabels: string[] = []
+  const aLabels: string[] = []
+
+  const pushCard = (label: string, text: string, seconds: number) => {
+    const { video, audio } = cardFilter(writeTextFile(`${label}.txt`, text), font!, seconds, cardW, cardH, cardFps)
+    chains.push(`${video}[${label}v]`, `${audio}[${label}a]`)
+    vLabels.push(`[${label}v]`)
+    aLabels.push(`[${label}a]`)
+  }
+
+  if (font && titleText) pushCard('title', titleText, TITLE_CARD_SECONDS)
+
+  for (let i = 0; i < n; i++) {
+    chains.push(`[${i}:v:0]setpts=PTS-STARTPTS[v${i}]`)
+    if (probes[i].hasAudio) {
+      chains.push(`[${i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[a${i}]`)
+    } else {
+      const d = (probes[i].videoDuration || 5).toFixed(3)
+      chains.push(`anullsrc=r=48000:cl=stereo,asetpts=PTS-STARTPTS,atrim=duration=${d},aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`)
+    }
+    vLabels.push(`[v${i}]`)
+    aLabels.push(`[a${i}]`)
+  }
+
+  if (font) pushCard('end', '剧终', END_CARD_SECONDS)
+
+  const concatIn = vLabels.map((v, i) => `${v}${aLabels[i]}`).join('')
+  const filter = [...chains, `${concatIn}concat=n=${vLabels.length}:v=1:a=1[v][a]`].join(';')
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      cmd
+        .complexFilter(filter)
+        .outputOptions([
+          '-map', '[v]', '-map', '[a]',
+          '-c:v', 'libx264',
+          '-preset', 'medium',
+          '-crf', '23',
+          '-c:a', 'aac',
+          '-b:a', '192k',
+          '-movflags', '+faststart',
+        ])
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
+        .run()
+    })
+  } finally {
+    if (tempDir) { try { fs.rmSync(tempDir, { recursive: true, force: true }) } catch {} }
+  }
 
   // 获取时长
   const duration = await getVideoDuration(outputPath)
 
   const mergedRelative = `static/merged/${outputFilename}`
 
-  // 成片海报帧（导出页封面用）
-  await extractVideoPoster(mergedRelative)
+  // 成片海报帧（导出页封面用）：跳过片头字幕卡，取片头后 1s 的正片画面
+  await extractVideoPoster(mergedRelative, TITLE_CARD_SECONDS + 1)
 
   // 更新 merge 记录
   await db.update(schema.videoMerges)
