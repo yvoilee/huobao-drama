@@ -11,10 +11,11 @@ export function posterPathFor(relativePath: string): string {
 }
 
 /**
- * 抽取视频 0.5s 处画面作为海报帧（宽 640，等比缩放，与原视频同目录）。
+ * 抽取视频指定秒数处画面作为海报帧（宽 640，等比缩放，与原视频同目录）。
+ * 默认 0.5s；拼接成片带片头时传 4s 跳过字幕卡，避免封面截到黑底剧名。
  * 失败返回 null，不阻断主流程。
  */
-export async function extractVideoPoster(relativePath: string): Promise<string | null> {
+export async function extractVideoPoster(relativePath: string, atSeconds = 0.5): Promise<string | null> {
   try {
     // ffmpeg 二进制损坏（跨平台拷贝 node_modules / 下载不完整）时静默跳过，
     // 避免 fluent-ffmpeg 延迟回调里的同步 EFTYPE 崩掉整个进程
@@ -26,7 +27,7 @@ export async function extractVideoPoster(relativePath: string): Promise<string |
     await new Promise<void>((resolve, reject) => {
       ffmpeg(getAbsolutePath(relativePath))
         .screenshots({
-          timestamps: ['0.5'],
+          timestamps: [String(atSeconds)],
           filename: path.basename(posterAbs),
           folder: path.dirname(posterAbs),
           size: '640x?',
