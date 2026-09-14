@@ -8,6 +8,7 @@ const FILENAMES: Record<string, string> = {
   openai: 'openai.png',
   gemini: 'gemini-color.png',
   volcengine: 'volcengine-color.png',
+  agentplan: 'volcengine-color.png',
   minimax: 'minimax-color.png',
   claude: 'claude-color.png',
   deepseek: 'deepseek-color.png',

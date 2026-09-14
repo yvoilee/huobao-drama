@@ -84,6 +84,31 @@ function buildProbe(serviceType: string, provider: string, baseUrl: string, mode
     }
   }
 
+  if (p === 'agentplan') {
+    // 火山方舟 AgentPlan（企业版）：前缀 /api/plan/v3，文本/图片/视频三种服务协议与普通方舟一致。
+    // 文本用最小合法请求体（model + messages）探测：空体会在鉴权通过后被网关以 400 MissingParameter 拒绝，
+    // 无法区分「路径/鉴权正确」与「请求体非法」；带上 model 后，鉴权通过即返回 200（或按模型是否存在返回明确错误）。
+    // 图片/视频空体探测连通性即可（400 亦计入 reachable），不真正创建计费任务。
+    if (serviceType === 'text') {
+      return {
+        method: 'POST',
+        url: joinProviderUrl(baseUrl, '/api/plan/v3', '/chat/completions'),
+        headers: bearerHeaders(apiKey, true),
+        body: { model: m || 'deepseek-v4-pro', messages: [{ role: 'user', content: 'hi' }] },
+      }
+    }
+    const isVideo = serviceType === 'video'
+    const path = isVideo ? '/contents/generations/tasks' : '/images/generations'
+    const fallback = isVideo ? 'doubao-seedance-2.0' : 'doubao-seedream-5.0-lite'
+    return {
+      method: 'POST',
+      url: joinProviderUrl(baseUrl, '/api/plan/v3', path),
+      headers: bearerHeaders(apiKey, true),
+      // 仅带 model 不带 prompt/content：校验端点/鉴权/模型名，同时避免真正生图/生视频产生计费
+      body: { model: m || fallback },
+    }
+  }
+
   if (p === 'minimax') {
     // MiniMax 仅提供视频服务，空请求体探测鉴权/端点连通性
     return {
@@ -196,16 +221,26 @@ app.post('/test', async (c) => {
     })
     const text = await resp.text()
     const reachable = [200, 204, 400, 401, 403].includes(resp.status)
+
+    // 免费探针刻意省略生成参数（prompt/content 等）以避免计费，故上游可能返回 400「缺少参数」。
+    // 此时端点与鉴权均已通过，只是探针没带参数——视为连通成功而非失败。
+    const missingParam = resp.status === 400 && /MissingParameter|is missing/i.test(text)
+    const ok = resp.ok || missingParam
+
     const payload = {
-      ok: resp.ok,
+      ok,
       reachable,
       status: resp.status,
       status_text: resp.statusText,
       method: probe.method,
       url: probeUrl,
-      message: reachable
-        ? (resp.ok ? '端点可访问，认证与路径基本正常' : '端点已响应，请根据状态码判断认证或路径是否正确')
-        : '端点未按预期响应，请检查 Base URL 和代理前缀',
+      message: resp.ok
+        ? '端点可访问，认证与路径基本正常'
+        : missingParam
+          ? '端点可访问，认证与路径正确（探针未携带生成参数，属预期响应）'
+          : reachable
+            ? '端点已响应，请根据状态码判断认证或路径是否正确'
+            : '端点未按预期响应，请检查 Base URL 和代理前缀',
       response_preview: text.slice(0, 240),
     }
     if (reachable) {

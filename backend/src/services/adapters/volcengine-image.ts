@@ -16,9 +16,15 @@ import { joinProviderUrl } from './url'
 export class VolcEngineImageAdapter implements ImageProviderAdapter {
   provider = 'volcengine'
 
+  /** 方舟接口前缀：普通方舟 /api/v3，AgentPlan 企业版 /api/plan/v3（子类覆写） */
+  protected apiPrefix = '/api/v3'
+
+  /** 默认模型 */
+  protected defaultModel = 'doubao-seedream-5-0-260128'
+
   buildGenerateRequest(config: AIConfig, record: ImageGenerationRecord): ProviderRequest {
     // 火山引擎使用 seedream 模型
-    const model = record.model || config.model || 'doubao-seedream-5-0-260128'
+    const model = record.model || config.model || this.defaultModel
 
     const body: any = {
       model,
@@ -35,7 +41,7 @@ export class VolcEngineImageAdapter implements ImageProviderAdapter {
     }
 
     return {
-      url: joinProviderUrl(config.baseUrl, '/api/v3', '/images/generations'),
+      url: joinProviderUrl(config.baseUrl, this.apiPrefix, '/images/generations'),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -60,7 +66,7 @@ export class VolcEngineImageAdapter implements ImageProviderAdapter {
 
   buildPollRequest(config: AIConfig, taskId: string): ProviderRequest {
     return {
-      url: joinProviderUrl(config.baseUrl, '/api/v3', `/images/generations/${taskId}`),
+      url: joinProviderUrl(config.baseUrl, this.apiPrefix, `/images/generations/${taskId}`),
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${config.apiKey}`,
