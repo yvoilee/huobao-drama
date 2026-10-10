@@ -503,7 +503,9 @@
       "rewriting": "대본을 재작성하는 중...",
       "scriptPlaceholder": "형식화된 대본 내용...",
       "rawRequired": "먼저 원문을 입력하세요",
-      "skipDone": "AI 재작성을 건거이습니다. 원문을 그대로 사용합니다"
+      "skipDone": "AI 재작성을 건거이습니다. 원문을 그대로 사용합니다",
+      "refinePlaceholder": "대본 미세조정, 예: 2번째 장면 실내로 / 대사 축약",
+      "refineSend": "미세조정"
     },
     "prod": {
       "assets": "에셋 제작",

@@ -75,4 +75,20 @@ const saveScript = createTool({
   },
 })
 
-export const scriptTools = { readEpisodeScript, rewriteToScreenplay, saveScript }
+const readCurrentScript = createTool({
+  id: 'read_current_script',
+  description: 'Read the current (already rewritten) screenplay content of the current episode. Prefers the saved screenplay, falls back to raw content.',
+  inputSchema: z.object({}),
+  execute: async (_input, context) => {
+    const episodeId = getEpisodeId(context?.requestContext)
+    if (!episodeId) return { error: 'Missing episodeId in request context' }
+    const [ep] = await db.select().from(schema.episodes)
+      .where(eq(schema.episodes.id, episodeId))
+    if (!ep) return { error: `Episode not found (id=${episodeId})` }
+    const content = ep.scriptContent || ep.content
+    if (!content) return { error: `Episode has no script content (id=${episodeId})` }
+    return { content, word_count: content.length, episode_id: episodeId }
+  },
+})
+
+export const scriptTools = { readEpisodeScript, rewriteToScreenplay, saveScript, readCurrentScript }

@@ -503,7 +503,9 @@
       "rewriting": "脚本をリライト中...",
       "scriptPlaceholder": "書式付き脚本の内容...",
       "rawRequired": "先に原文を入力してください",
-      "skipDone": "AI リライトをスキップしました。原文をそのまま使用します"
+      "skipDone": "AI リライトをスキップしました。原文をそのまま使用します",
+      "refinePlaceholder": "脚本を微調整、例：第2場を屋内に / セリフを短縮",
+      "refineSend": "微調整"
     },
     "prod": {
       "assets": "アセット制作",

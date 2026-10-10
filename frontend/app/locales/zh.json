@@ -503,7 +503,9 @@
       "rewriting": "正在改写剧本...",
       "scriptPlaceholder": "格式化剧本内容...",
       "rawRequired": "请先填写原始内容",
-      "skipDone": "已跳过 AI 改写，当前将直接使用原始内容"
+      "skipDone": "已跳过 AI 改写，当前将直接使用原始内容",
+      "refinePlaceholder": "微调剧本，如：第 2 场改成内景 / 压缩对白",
+      "refineSend": "微调"
     },
     "prod": {
       "assets": "资产制作",

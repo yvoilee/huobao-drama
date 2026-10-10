@@ -233,7 +233,22 @@
             <Loader2 :size="24" class="animate-spin" style="color:var(--accent)" />
             <div class="loading-text">{{ t('episode.script.rewriting') }}</div>
           </div>
-          <textarea v-else class="fill-textarea" v-model="localScript" :placeholder="t('episode.script.scriptPlaceholder')" />
+          <template v-else>
+            <div v-if="scriptContent" class="sb-refine-bar">
+              <input
+                v-model="scriptRefineInput"
+                class="sb-refine-input"
+                :placeholder="t('episode.script.refinePlaceholder')"
+                :disabled="rn"
+                @keydown.enter.prevent="doScriptRefine"
+              />
+              <button class="btn btn-sm" :disabled="rn || !scriptRefineInput.trim()" @click="doScriptRefine">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9z"/></svg>
+                {{ t('episode.script.refineSend') }}
+              </button>
+            </div>
+            <textarea class="fill-textarea" v-model="localScript" :placeholder="t('episode.script.scriptPlaceholder')" />
+          </template>
         </div>
       </div>
 
@@ -2745,6 +2760,20 @@ function saveScr() { episodeAPI.update(epId.value, { script_content: localScript
 // 发给 Agent 的 message 是功能性提示词而非 UI 文案：产出语言由后端全局「内容语言」指令控制，
 // 这里保持中文不随界面语言变化
 function doRewrite() { saveRaw(); runAgent('script_rewriter', '请读取剧本并改写为格式化剧本，然后保存', dramaId, epId.value, refresh, chatModelOverride(), chatConfigId()) }
+
+// ─── 剧本对话式微调（轻量追问框，非流式）：自然语言 → 增量修改意图 ──
+const scriptRefineInput = ref('')
+const scriptRefineSending = computed(() => rn.value && rt.value === 'script_rewriter')
+
+function doScriptRefine() {
+  const q = scriptRefineInput.value.trim()
+  if (!q || !epId.value || scriptRefineSending.value) return
+  saveScr() // 先落盘本地手工改动，保证 Agent 读到最新剧本
+  const msg = `这是对现有剧本的「增量修改 / 微调」请求（不要重新改写整集）：${q}
+
+请先调用 read_current_script 读取当前剧本，只修改我点名的段落/字段、其余保持不变，然后用 save_script 保存完整剧本；不要从原始内容重新整体改写、不要改动我没提到的部分。`
+  runAgent('script_rewriter', msg, dramaId, epId.value, () => { scriptRefineInput.value = ''; refresh() }, chatModelOverride(), chatConfigId())
+}
 function skipRewrite() {
   const raw = (localRaw.value || rawContent.value || '').trim()
   if (!raw) {

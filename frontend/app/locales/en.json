@@ -503,7 +503,9 @@
       "rewriting": "Rewriting the script...",
       "scriptPlaceholder": "Formatted script content...",
       "rawRequired": "Please fill in the raw content first",
-      "skipDone": "AI rewrite skipped; the raw content will be used directly"
+      "skipDone": "AI rewrite skipped; the raw content will be used directly",
+      "refinePlaceholder": "Refine script, e.g. make scene 2 indoor / tighten the dialogue",
+      "refineSend": "Refine"
     },
     "prod": {
       "assets": "Asset Production",
