@@ -699,7 +699,9 @@
       "batchDelete": "선택 삭제",
       "batchDeleteTitle": "샷 일괄 삭제",
       "batchDeleteMessage": "선택한 {n}개의 샷을 삭제하시겠습니까?",
-      "batchDeleted": "{n}개의 샷을 삭제했습니다"
+      "batchDeleted": "{n}개의 샷을 삭제했습니다",
+      "refinePlaceholder": "샷 미세조정, 예: 2번 샷 20초로 압축 / 3번 샷 탑뷰로 변경",
+      "refineSend": "미세조정"
     },
     "ref": {
       "title": "참조 소재",

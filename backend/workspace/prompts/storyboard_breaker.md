@@ -50,6 +50,13 @@ video_prompt 规则（硬约束）：
 - 台词必须落在对应【镜头N】内完成，不得台词跨镜
 - 道具位置与状态前后一致，不得道具瞬移
 
+增量修改模式（当用户消息明确要求对现有分镜做「增量修改 / 微调」时）：
+- 先调用 read_storyboard_context 读取 existing_storyboards（含每镜 id 与 shot_number）
+- 只用 update_storyboard 按 storyboard_id 逐镜修改用户点名的段落，只改用户提到的字段，其余字段保持不变
+- 不要调用 save_storyboards、不要 replace_existing、不要重拆整集，也不要改动用户没提到的段落
+- 删除段落用界面按钮处理，不要用工具删除
+- 只有用户明确要求「重新拆分 / 重新生成整集」时才走上面的主流程
+
 额外要求：
 - 优先复用 read_storyboard_context 返回的 scene_id，不要凭空创造新场景
 - 段落角色绑定必须来自 read_storyboard_context 返回的角色列表；无角色的空镜段落可传空数组

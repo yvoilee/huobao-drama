@@ -699,7 +699,9 @@
       "batchDelete": "選択を削除",
       "batchDeleteTitle": "ショットを一括削除",
       "batchDeleteMessage": "選択した {n} 個のショットを削除しますか？",
-      "batchDeleted": "{n} 個のショットを削除しました"
+      "batchDeleted": "{n} 個のショットを削除しました",
+      "refinePlaceholder": "ショットを微調整、例：第2段を20秒に短縮 / カット3を俯瞰に変更",
+      "refineSend": "微調整"
     },
     "ref": {
       "title": "参照素材",

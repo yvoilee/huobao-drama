@@ -511,6 +511,20 @@
                 </button>
               </div>
             </div>
+            <div v-if="sbs.length" class="sb-refine-bar">
+              <input
+                v-model="refineInput"
+                class="sb-refine-input"
+                :placeholder="t('episode.sb.refinePlaceholder')"
+                :disabled="rn"
+                @keydown.enter.prevent="doRefine"
+              />
+              <button class="btn btn-sm" :disabled="rn || !refineInput.trim()" @click="doRefine">
+                <Loader2 v-if="refineSending" :size="11" class="animate-spin" />
+                <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9z"/></svg>
+                {{ t('episode.sb.refineSend') }}
+              </button>
+            </div>
             <div v-if="!sbs.length" class="step-empty video-task-empty-state">
               <div class="empty-visual">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="2.5"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="13" y1="8" x2="13" y2="16"/></svg>
@@ -2901,6 +2915,19 @@ async function onBreakdownDone() {
   if (missing.length) batchVideoPrompts()
 }
 
+// ─── 分镜对话式微调（轻量追问框，非流式）：用户自然语言 → 增量修改意图 ──
+const refineInput = ref('')
+const refineSending = computed(() => rn.value && rt.value === 'storyboard_breaker')
+
+function doRefine() {
+  const q = refineInput.value.trim()
+  if (!q || !epId.value || refineSending.value) return
+  const msg = `这是对现有分镜的「增量修改 / 微调」请求（不要重新拆分整集）：${q}
+
+请先调用 read_storyboard_context 读取现有分镜，然后仅用 update_storyboard 按 storyboard_id 修改我点名的段落，只改我提到的字段、其余保持不变；不要调用 save_storyboards、不要 replace_existing、不要改动我没提到的段落。`
+  runAgent('storyboard_breaker', msg, dramaId, epId.value, () => { refineInput.value = ''; refresh() }, chatModelOverride(), chatConfigId())
+}
+
 // 按需为单个分镜生成视频提示词：由 prompt_generator 读取分镜字段生成并保存到 video_prompt
 async function genVideoPrompt(sb) {
   if (!sb || videoPromptGeneratingIds.value.includes(sb.id)) return
@@ -4249,6 +4276,10 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
 /* Production content */
 .prod-content { flex: 1; overflow-y: auto; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
 .prod-section-bar { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.sb-refine-bar { display: flex; align-items: center; gap: 7px; }
+.sb-refine-input { flex: 1; min-width: 0; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; outline: none; background: var(--bg-input); color: var(--text-0); font-family: var(--font-body); font-size: 12px; }
+.sb-refine-input::placeholder { color: var(--text-3); }
+.sb-refine-input:focus { border-color: var(--accent); }
 
 /* 资产栏动作：提取（虚线中性）与批量生成（强调色）视觉分组 */
 .asset-bar-actions { align-items: center; }

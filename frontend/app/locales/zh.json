@@ -699,7 +699,9 @@
       "batchDelete": "删除所选",
       "batchDeleteTitle": "批量删除镜头",
       "batchDeleteMessage": "确定删除选中的 {n} 个镜头吗？",
-      "batchDeleted": "已删除 {n} 个镜头"
+      "batchDeleted": "已删除 {n} 个镜头",
+      "refinePlaceholder": "微调分镜，如：第 2 段压到 20 秒 / 镜头 3 改成俯拍",
+      "refineSend": "微调"
     },
     "ref": {
       "title": "参考素材",

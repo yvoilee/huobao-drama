@@ -699,7 +699,9 @@
       "batchDelete": "Delete selected",
       "batchDeleteTitle": "Delete shots",
       "batchDeleteMessage": "Delete {n} selected shots?",
-      "batchDeleted": "Deleted {n} shots"
+      "batchDeleted": "Deleted {n} shots",
+      "refinePlaceholder": "Refine shots, e.g. compress shot 2 to 20s / make shot 3 a top-down view",
+      "refineSend": "Refine"
     },
     "ref": {
       "title": "Reference Assets",
