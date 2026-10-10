@@ -22,6 +22,18 @@ const POLL_PROFILES: Record<TaskType, { attempts: number; intervalMs: number; ma
   video: { attempts: 300, intervalMs: 10_000, maxDurationMs: null },
 }
 
+// 全局真人护栏：视频提示词尾部统一追加，压低 Seedance 等平台真人内容审核拦截。
+// 仅排除真实可辨认人物（肖像/身份），不影响「电影写实」的写实质感。
+const VIDEO_REAL_PERSON_GUARD = 'fictional original characters only, no real person, no real celebrity likeness, no identifiable real human face'
+
+function withRealPersonGuard(prompt: string | null | undefined): string {
+  const p = (prompt || '').trim()
+  if (!p) return p
+  // 已含同类护栏措辞则跳过，避免重复叠加
+  if (/no real person|no real celebrity|fictional original characters/i.test(p)) return p
+  return `${p}. ${VIDEO_REAL_PERSON_GUARD}`
+}
+
 interface GenerateImageParams {
   storyboardId?: number
   dramaId?: number
@@ -229,7 +241,7 @@ async function processTask(id: number, config: AIConfig) {
       ;({ url, method, headers, body } = adapter.buildGenerateRequest(config, {
         id: record.id,
         model: record.model,
-        prompt: record.prompt,
+        prompt: withRealPersonGuard(record.prompt),
         referenceMode: params.referenceMode,
         imageUrl: resolvedImageUrl,
         firstFrameUrl: resolvedFirstFrameUrl,

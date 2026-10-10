@@ -329,6 +329,11 @@ export const stylePresetSeeds = [
     description: '美式漫画粗线条风格',
   },
   {
+    name: '电影写实', value: 'live', sortOrder: 6,
+    prompt: 'cinematic live-action film realism, professional film photography, semi-realistic fictional character design, stylized clearly fictional facial features, detailed realistic material and texture rendering, naturalistic lighting with soft realistic shadows, shallow depth of field with creamy bokeh, true-to-life color grading with subtle film grain, 35mm anamorphic lens cinematic framing, detailed realistic environments and props, feature-film production quality, consistent character design across shots, fictional original characters only, avoid photorealistic human face, avoid real person, avoid real celebrity likeness, avoid identifiable real human face, avoid cartoon or anime features, avoid flat 2D illustration look, avoid plastic waxy skin, avoid over-smoothing beauty filter',
+    description: '半写实虚构角色 + 电影写实质感（非真人）',
+  },
+  {
     name: '国风 2.5D', value: 'guofeng', sortOrder: 7,
     prompt: 'Chinese guofeng 2.5D illustration style, semi-realistic donghua-quality character art, elegant flowing line work, rich traditional Chinese aesthetic elements, layered ink-wash inspired atmospheric backgrounds, refined silk and fabric textures, soft luminous lighting with gentle haze, sophisticated muted jewel-tone palette, xianxia drama poster quality, consistent character design across shots, avoid flat cel shading, avoid western comic ink style, avoid photorealism, avoid plastic 3D look, avoid modern clothing and props unless specified',
     description: '国风动画/仙侠剧质感，2.5D 半写实',
@@ -360,11 +365,10 @@ const LEGACY_SEED_PROMPTS: Record<string, string> = {
 /**
  * 已下架的种子预设 — 内容寻址删除：仅当库中行的 prompt 仍是种子原文
  * （未被用户编辑过）才删除；用户改过的同名行视为用户数据保留。
- * live（真人写实）：真人影像过不了平台真人内容审核，下架。
+ * 预留：曾用于下架 live（真人写实），现已改名为「电影写实」重新上架
+ * （虚构角色 + no real person 护栏），故清空；后续若再下架可在此登记。
  */
-const REMOVED_SEED_PROMPTS: Record<string, string> = {
-  live: 'ultra-realistic cinematic live-action look, professional film photography, natural skin tones with detailed pores and realistic texture, true human anatomy and proportions, shallow depth of field with creamy bokeh, cinematic three-point lighting, subtle film grain, 35mm lens cinematic framing, true-to-life color grading, detailed real-world environments, consistent actor appearance across shots, avoid cartoon or anime features, avoid 3D render look, avoid illustration style, avoid plastic waxy skin, avoid over-smoothing beauty filter',
-}
+const REMOVED_SEED_PROMPTS: Record<string, string> = {}
 
 // INSERT ... SELECT WHERE NOT EXISTS → 幂等：只补缺失行，不覆盖用户编辑
 // （SQLite 无 FROM DUAL，无 FROM 的 SELECT 合法）
