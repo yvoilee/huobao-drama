@@ -23,6 +23,9 @@ function toAbsPath(relativePath: string): string {
 const TITLE_CARD_SECONDS = 3
 const END_CARD_SECONDS = 2
 
+// 镜头间过渡时长（秒）：画面 xfade 交叉溶解 + 音频 acrossfade 交叉淡化共用此值，保证音画同步
+const XFADE_SECONDS = 0.4
+
 /**
  * 拼接一集的镜头视频。
  * 优先使用视频生成产物，兼容历史的 composedVideoUrl 数据。
@@ -197,41 +200,64 @@ async function doMerge(mergeId: number, episodeId: number, videos: string[], tit
     return file
   }
 
-  // 用 concat filter（而非 concat demuxer）逐条独立解码：各镜头采样率/编码参数不一致时
+  // 用 filter（而非 concat demuxer）逐条独立解码：各镜头采样率/编码参数不一致时
   // （如 Seedance 部分镜头 44100Hz、其余 32000Hz），demuxer 会按首个镜头参数误读后续音轨，
   // 导致音画漂移；filter 逐条解码 + aresample/aformat 统一到 48k 立体声 fltp 可根治。
   const cmd = ffmpeg()
   abs.forEach(p => cmd.input(p))
 
-  const chains: string[] = []
-  const vLabels: string[] = []
-  const aLabels: string[] = []
+  // 组装所有「段」（片头卡 + 各镜头 + 片尾卡）：每段带视频/音频 filter 与时长
+  // 过渡用同一 FADE 秒数：视频 xfade + 音频 acrossfade 每处过渡都缩短 FADE 秒，音画总时长保持一致
+  const FADE = XFADE_SECONDS
 
-  const pushCard = (label: string, text: string, seconds: number) => {
-    const { video, audio } = cardFilter(writeTextFile(`${label}.txt`, text), font!, seconds, cardW, cardH, cardFps)
-    chains.push(`${video}[${label}v]`, `${audio}[${label}a]`)
-    vLabels.push(`[${label}v]`)
-    aLabels.push(`[${label}a]`)
+  type Segment = { v: string; a: string; dur: number }
+  const segs: Segment[] = []
+  const pushCard = (text: string, seconds: number) => {
+    const { video, audio } = cardFilter(writeTextFile(`card-${segs.length}.txt`, text), font!, seconds, cardW, cardH, cardFps)
+    segs.push({ v: video, a: audio, dur: seconds })
   }
 
-  if (font && titleText) pushCard('title', titleText, TITLE_CARD_SECONDS)
+  if (font && titleText) pushCard(titleText, TITLE_CARD_SECONDS)
 
   for (let i = 0; i < n; i++) {
-    chains.push(`[${i}:v:0]setpts=PTS-STARTPTS[v${i}]`)
-    if (probes[i].hasAudio) {
-      chains.push(`[${i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[a${i}]`)
-    } else {
-      const d = (probes[i].videoDuration || 5).toFixed(3)
-      chains.push(`anullsrc=r=48000:cl=stereo,asetpts=PTS-STARTPTS,atrim=duration=${d},aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`)
-    }
-    vLabels.push(`[v${i}]`)
-    aLabels.push(`[a${i}]`)
+    const dur = probes[i].videoDuration || 5
+    // 归一化到首个镜头参数（分辨率/帧率/像素格式/SAR），xfade 要求两端参数严格一致
+    const v = `[${i}:v:0]scale=${cardW}:${cardH}:force_original_aspect_ratio=decrease,pad=${cardW}:${cardH}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${cardFps},format=yuv420p,setpts=PTS-STARTPTS`
+    const a = probes[i].hasAudio
+      ? `[${i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS`
+      : `anullsrc=r=48000:cl=stereo,asetpts=PTS-STARTPTS,atrim=duration=${dur.toFixed(3)},aformat=sample_fmts=fltp:channel_layouts=stereo`
+    segs.push({ v, a, dur })
   }
 
-  if (font) pushCard('end', '剧终', END_CARD_SECONDS)
+  if (font) pushCard('剧终', END_CARD_SECONDS)
 
-  const concatIn = vLabels.map((v, i) => `${v}${aLabels[i]}`).join('')
-  const filter = [...chains, `${concatIn}concat=n=${vLabels.length}:v=1:a=1[v][a]`].join(';')
+  const chains: string[] = []
+  segs.forEach((s, i) => chains.push(`${s.v}[vseg${i}]`, `${s.a}[aseg${i}]`))
+
+  const m = segs.length
+  if (m === 1) {
+    // 单段无过渡：直接透传
+    chains.push(`[vseg0][aseg0]concat=n=1:v=1:a=1[v][araw]`)
+  } else {
+    // 链式 xfade（视频）与 acrossfade（音频）：累计时长求 offset；减 0.05s 留安全余量，避免取整误差导致 offset 越界
+    let cumDur = segs[0].dur
+    let vPrev = 'vseg0'
+    let aPrev = 'aseg0'
+    for (let k = 0; k < m - 1; k++) {
+      const offset = Math.max(0, cumDur - FADE - 0.05).toFixed(3)
+      const vOut = k === m - 2 ? 'v' : `xf${k}`
+      chains.push(`[${vPrev}][vseg${k + 1}]xfade=transition=fade:duration=${FADE}:offset=${offset}[${vOut}]`)
+      cumDur = cumDur - FADE + segs[k + 1].dur
+      vPrev = vOut
+      const aOut = k === m - 2 ? 'araw' : `af${k}`
+      chains.push(`[${aPrev}][aseg${k + 1}]acrossfade=d=${FADE}[${aOut}]`)
+      aPrev = aOut
+    }
+  }
+  // 响度归一化：统一到广播响度（-16 LUFS），消除镜头间音量跳变
+  chains.push(`[araw]loudnorm=I=-16:TP=-1.5:LRA=11[a]`)
+
+  const filter = chains.join(';')
 
   try {
     await new Promise<void>((resolve, reject) => {
