@@ -691,7 +691,15 @@
       "batchDone": "動画プロンプトの一括生成が完了しました",
       "batchDoneFailed": "動画プロンプトの一括生成が完了しました（{n} 件失敗）",
       "batchFailed": "動画プロンプトの一括生成に失敗しました",
-      "promptGenerated": "分镜 #{n} の動画プロンプトを生成しました"
+      "promptGenerated": "分镜 #{n} の動画プロンプトを生成しました",
+      "del": "ショットを削除",
+      "delTitle": "ショットを削除",
+      "delMessage": "ショット「{name}」を削除しますか？",
+      "deleted": "ショットを削除しました",
+      "batchDelete": "選択を削除",
+      "batchDeleteTitle": "ショットを一括削除",
+      "batchDeleteMessage": "選択した {n} 個のショットを削除しますか？",
+      "batchDeleted": "{n} 個のショットを削除しました"
     },
     "ref": {
       "title": "参照素材",

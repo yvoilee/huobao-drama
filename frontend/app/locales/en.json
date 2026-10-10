@@ -691,7 +691,15 @@
       "batchDone": "Batch video prompt generation complete",
       "batchDoneFailed": "Batch video prompt generation complete, {n} failed",
       "batchFailed": "Batch video prompt generation failed",
-      "promptGenerated": "Video prompt for shot #{n} generated"
+      "promptGenerated": "Video prompt for shot #{n} generated",
+      "del": "Delete shot",
+      "delTitle": "Delete shot",
+      "delMessage": "Delete shot “{name}”?",
+      "deleted": "Shot deleted",
+      "batchDelete": "Delete selected",
+      "batchDeleteTitle": "Delete shots",
+      "batchDeleteMessage": "Delete {n} selected shots?",
+      "batchDeleted": "Deleted {n} shots"
     },
     "ref": {
       "title": "Reference Assets",

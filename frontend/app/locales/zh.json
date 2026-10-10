@@ -691,7 +691,15 @@
       "batchDone": "视频提示词批量生成完成",
       "batchDoneFailed": "视频提示词批量生成完成，{n} 个失败",
       "batchFailed": "视频提示词批量生成失败",
-      "promptGenerated": "分镜 #{n} 视频提示词已生成"
+      "promptGenerated": "分镜 #{n} 视频提示词已生成",
+      "del": "删除镜头",
+      "delTitle": "删除镜头",
+      "delMessage": "确定删除镜头「{name}」吗？",
+      "deleted": "已删除镜头",
+      "batchDelete": "删除所选",
+      "batchDeleteTitle": "批量删除镜头",
+      "batchDeleteMessage": "确定删除选中的 {n} 个镜头吗？",
+      "batchDeleted": "已删除 {n} 个镜头"
     },
     "ref": {
       "title": "参考素材",

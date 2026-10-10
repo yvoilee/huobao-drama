@@ -541,6 +541,9 @@
                   <button class="shot-quick-btn" @click="toggleSelectAllVideos">{{ t('episode.sb.selectAll') }}</button>
                   <button class="shot-quick-btn" @click="selectMissingVideos">{{ t('episode.vid.selectMissing') }}</button>
                   <button class="shot-quick-btn" @click="selectedVideoSbIds = []">{{ t('episode.sb.clear') }}</button>
+                  <button class="shot-quick-btn is-danger" :disabled="!selectedVideoSbIds.length" @click="askBatchDeleteSb">
+                    {{ t('episode.sb.batchDelete') }}
+                  </button>
                 </div>
                 <div class="video-task-table">
                 <div
@@ -595,14 +598,23 @@
                       <div v-if="videoModerationHint(task.error)" class="video-task-error-hint">{{ videoModerationHint(task.error) }}</div>
                     </div>
                   </div>
-                  <button
-                    class="btn btn-icon btn-sm video-task-action"
-                    :title="videoTaskActionLabel(task.storyboard)"
-                    :disabled="videoTaskState(task.storyboard) === 'pending'"
-                    @click.stop="genVid(task.storyboard)"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                  </button>
+                  <div class="video-task-actions">
+                    <button
+                      class="btn btn-icon btn-sm video-task-action"
+                      :title="videoTaskActionLabel(task.storyboard)"
+                      :disabled="videoTaskState(task.storyboard) === 'pending'"
+                      @click.stop="genVid(task.storyboard)"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                    </button>
+                    <button
+                      class="btn btn-icon btn-sm video-task-del"
+                      :title="t('episode.sb.del')"
+                      @click.stop="askDeleteSb(task.storyboard)"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
+                  </div>
                 </div>
                 </div>
               </section>
@@ -1422,6 +1434,22 @@
         @confirm="confirmDeleteAsset"
         @cancel="assetDelete.open = false"
       />
+      <ConfirmDialog
+        :open="sbDelete.open"
+        :title="t('episode.sb.delTitle')"
+        :message="t('episode.sb.delMessage', { name: sbDeleteName })"
+        :loading="sbDelete.loading"
+        @confirm="confirmDeleteSb"
+        @cancel="sbDelete.open = false"
+      />
+      <ConfirmDialog
+        :open="sbBatchDelete.open"
+        :title="t('episode.sb.batchDeleteTitle')"
+        :message="t('episode.sb.batchDeleteMessage', { n: selectedVideoSbIds.length })"
+        :loading="sbBatchDelete.loading"
+        @confirm="confirmBatchDeleteSb"
+        @cancel="sbBatchDelete.open = false"
+      />
     </main>
     </div>
   </div>
@@ -1744,6 +1772,58 @@ async function confirmDeleteAsset() {
   }
 }
 
+// ─── 删除分镜段落 ────────────────────────────────────────────
+const sbDelete = ref({ open: false, sb: null, loading: false })
+const sbDeleteName = computed(() => sbDelete.value.sb?.title || t('episode.sb.shotN', { n: sbDelete.value.sb?.storyboard_number ?? sbDelete.value.sb?.storyboardNumber ?? '' }))
+
+function askDeleteSb(sb) {
+  sbDelete.value = { open: true, sb, loading: false }
+}
+
+async function confirmDeleteSb() {
+  const sb = sbDelete.value.sb
+  if (!sb || sbDelete.value.loading) return
+  sbDelete.value.loading = true
+  try {
+    await storyboardAPI.del(sb.id)
+    sbDelete.value.open = false
+    toast.success(t('episode.sb.deleted'))
+    if (selectedSb.value?.id === sb.id) selectedSb.value = null
+    selectedVideoSbIds.value = selectedVideoSbIds.value.filter(id => id !== sb.id)
+    await refresh()
+  } catch (e) {
+    toastError(e, { fallback: 'common.deleteFailed' })
+  } finally {
+    sbDelete.value.loading = false
+  }
+}
+
+// ─── 批量删除分镜段落 ────────────────────────────────────────
+const sbBatchDelete = ref({ open: false, loading: false })
+
+function askBatchDeleteSb() {
+  if (!selectedVideoSbIds.value.length) return
+  sbBatchDelete.value = { open: true, loading: false }
+}
+
+async function confirmBatchDeleteSb() {
+  const ids = [...selectedVideoSbIds.value]
+  if (!ids.length || sbBatchDelete.value.loading) { sbBatchDelete.value.open = false; return }
+  sbBatchDelete.value.loading = true
+  try {
+    await Promise.all(ids.map(id => storyboardAPI.del(id)))
+    sbBatchDelete.value.open = false
+    toast.success(t('episode.sb.batchDeleted', { n: ids.length }))
+    selectedVideoSbIds.value = []
+    if (selectedSb.value && ids.includes(selectedSb.value.id)) selectedSb.value = null
+    await refresh()
+  } catch (e) {
+    toastError(e, { fallback: 'common.deleteFailed' })
+  } finally {
+    sbBatchDelete.value.loading = false
+  }
+}
+
 function onAssetPromptInput(event) {
   assetPromptDraft.value = event.target.value
   assetPromptDirty.value = true
@@ -2033,20 +2113,22 @@ const lockedVideoConfigId = computed(() => episode.value?.video_config_id || epi
 // 内部统一存 480p/720p/1080p 三档，界面按当前选中的视频模型显示厂商原生档位
 // （Seedance 480p/720p、MiniMax 768P/2K、Wan 3.0 480P/720P/1080P），适配器再映射为官方枚举
 const RESOLUTION_TIERS = {
-  volcengine: ['480p', '720p'],
+  volcengine: ['480p', '720p', '1080p'],
   minimax: ['720p', '1080p'],
   aliyun: ['480p', '720p', '1080p'],
 }
 const RESOLUTION_DISPLAY = {
-  volcengine: { '480p': '480p', '720p': '720p', '1080p': '720p' },
+  volcengine: { '480p': '480p', '720p': '720p', '1080p': '1080p' },
   minimax: { '480p': '768P', '720p': '768P', '1080p': '2K' },
   aliyun: { '480p': '480P', '720p': '720P', '1080p': '1080P' },
 }
 const resolutionProvider = computed(() => RESOLUTION_TIERS[selectedVideoConfig.value?.provider] ? selectedVideoConfig.value.provider : 'volcengine')
-const resolutionOptions = computed(() => RESOLUTION_TIERS[resolutionProvider.value].map(key => ({
-  key,
-  model: `${RESOLUTION_DISPLAY[resolutionProvider.value][key]} · ${t(`episode.resolution.${key === '480p' ? 'smooth' : key === '720p' ? 'hd' : 'uhd'}`)}`,
-})))
+const resolutionOptions = computed(() => RESOLUTION_TIERS[resolutionProvider.value]
+  .filter(key => key !== '1080p' || resolutionProvider.value !== 'volcengine' || isSeedance25Video.value)
+  .map(key => ({
+    key,
+    model: `${RESOLUTION_DISPLAY[resolutionProvider.value][key]} · ${t(`episode.resolution.${key === '480p' ? 'smooth' : key === '720p' ? 'hd' : 'uhd'}`)}`,
+  })))
 const episodeResolution = computed({
   get: () => {
     const v = episode.value?.resolution
@@ -2120,8 +2202,14 @@ const selectedVideoConfig = computed(() => {
 const isWan3Video = computed(() => selectedVideoConfig.value?.provider === 'aliyun'
   || bareModelName(videoModel.value).startsWith('wan3.0-video'))
 
-// 参考图上限（Wan 3.0 官方 10 张，其他模型 9 张），绑定素材收集与 @名字 映射统一读取
-const refImageLimit = computed(() => isWan3Video.value ? 10 : 9)
+// Seedance 2.5（Ark 短横线 doubao-seedance-2-5 / AgentPlan 点命名 doubao-seedance-2.5）支持 1080p 与更多参考素材
+const isSeedance25Video = computed(() => {
+  const m = bareModelName(videoModel.value) || configModels(selectedVideoConfig.value)[0] || ''
+  return m.startsWith('doubao-seedance-2-5') || m.startsWith('doubao-seedance-2.5')
+})
+
+// 参考图上限（Seedance 2.5 官方 30 张，Wan 3.0 10 张，其他模型 9 张），绑定素材收集与 @名字 映射统一读取
+const refImageLimit = computed(() => isSeedance25Video.value ? 30 : (isWan3Video.value ? 10 : 9))
 
 // 本次生成的生效配置（模型/分辨率/时长），用于右侧小结与批量确认弹窗
 const effectiveVideoModelLabel = computed(() => {
@@ -4269,6 +4357,17 @@ onMounted(() => setTimeout(() => autoTour('episode', EPISODE_TOUR, t), 900))
   color: var(--accent-text);
   text-decoration: none;
 }
+.shot-quick-actions .shot-quick-btn.is-danger {
+  color: var(--error);
+}
+.shot-quick-actions .shot-quick-btn.is-danger:hover:not(:disabled) {
+  background: var(--action-danger);
+  color: #fff;
+}
+.shot-quick-actions .shot-quick-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 /* 新增资产弹窗 */
 .asset-create-dialog { width: 440px; max-width: calc(100vw - 48px); }
@@ -5078,6 +5177,23 @@ button.video-task-metric.on { box-shadow: 0 0 0 2px var(--accent); }
   width: 24px;
   height: 24px;
   padding: 0;
+}
+.video-task-actions {
+  justify-self: end;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.video-task-del {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--text-3);
+}
+.video-task-del:hover {
+  color: var(--error);
+  background: var(--bg-hover);
 }
 .video-task-inspector {
   min-width: 0;
