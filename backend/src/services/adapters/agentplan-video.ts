@@ -14,4 +14,9 @@ export class AgentPlanVideoAdapter extends VolcEngineVideoAdapter {
   protected modelPrefixes: string[] = ['doubao-seedance']
 
   protected defaultModel = 'doubao-seedance-2.0'
+
+  /** AgentPlan 使用点命名 doubao-seedance-2.5，覆写 2.5 判定 */
+  protected isSeedance25(model: string): boolean {
+    return model.startsWith('doubao-seedance-2.5')
+  }
 }
