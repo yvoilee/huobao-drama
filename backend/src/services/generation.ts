@@ -34,6 +34,18 @@ function withRealPersonGuard(prompt: string | null | undefined): string {
   return `${p}. ${VIDEO_REAL_PERSON_GUARD}`
 }
 
+// 全局无字幕护栏：视频提示词尾部统一追加，抑制 Seedance/minimax 在画面内渲染字幕/文字的倾向。
+// 分镜 prompt 里的「」引号台词易被视频模型当作画面字幕绘制；watermark:false 只关平台 Logo，管不到文字。
+const VIDEO_NO_TEXT_GUARD = 'no on-screen text, no subtitles, no captions, no titles, no watermark, no logo, no UI overlay'
+
+function withNoTextGuard(prompt: string | null | undefined): string {
+  const p = (prompt || '').trim()
+  if (!p) return p
+  // 已含同类护栏措辞则跳过，避免重复叠加
+  if (/no on-screen text|no subtitle|no caption|no watermark|no logo|no UI overlay/i.test(p)) return p
+  return `${p}. ${VIDEO_NO_TEXT_GUARD}`
+}
+
 interface GenerateImageParams {
   storyboardId?: number
   dramaId?: number
@@ -241,7 +253,7 @@ async function processTask(id: number, config: AIConfig) {
       ;({ url, method, headers, body } = adapter.buildGenerateRequest(config, {
         id: record.id,
         model: record.model,
-        prompt: withRealPersonGuard(record.prompt),
+        prompt: withNoTextGuard(withRealPersonGuard(record.prompt)),
         referenceMode: params.referenceMode,
         imageUrl: resolvedImageUrl,
         firstFrameUrl: resolvedFirstFrameUrl,
