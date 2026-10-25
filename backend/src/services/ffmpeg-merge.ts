@@ -19,9 +19,19 @@ function toAbsPath(relativePath: string): string {
   return path.join(STORAGE_ROOT, relativePath)
 }
 
-// 片头（剧名）/片尾（「剧终」）黑底白字卡的固定时长（秒）
+// 片头（剧名）/片尾（「本集完」）黑底白字卡的固定时长（秒）
 const TITLE_CARD_SECONDS = 3
 const END_CARD_SECONDS = 2
+
+// 字幕卡文字淡入淡出时长（秒）：黑底白字卡硬切是「生硬」的主要来源，用 alpha 渐隐消除
+const CARD_FADE_SECONDS = 0.6
+
+// 字幕卡主标题/副标题字号比例（相对画面高）
+const TITLE_FONT_RATIO = 0.1
+const SUBTITLE_FONT_RATIO = 0.045
+
+// 片尾文案（如需改回「剧终」/「全剧终」只改这一处）
+const END_CARD_TEXT = '本集完'
 
 // 镜头间过渡时长（秒）：画面 xfade 交叉溶解 + 音频 acrossfade 交叉淡化共用此值，保证音画同步
 const XFADE_SECONDS = 0.4
@@ -65,10 +75,14 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
 
   const videos = clips.map(c => c.url)
 
-  // 片头使用剧名（始终固定，不依赖前端配置）
-  const [drama] = await db.select({ title: schema.dramas.title })
+  // 片头使用剧名（始终固定，不依赖前端配置）；副标题带集数（仅多集时）
+  const [drama] = await db.select({ title: schema.dramas.title, totalEpisodes: schema.dramas.totalEpisodes })
     .from(schema.dramas).where(eq(schema.dramas.id, dramaId))
+  const [episode] = await db.select({ episodeNumber: schema.episodes.episodeNumber })
+    .from(schema.episodes).where(eq(schema.episodes.id, episodeId))
   const dramaTitle = drama?.title
+  const episodeNumber = episode?.episodeNumber
+  const totalEpisodes = drama?.totalEpisodes ?? 1
 
   logTaskStart('MergeTask', 'episode-merge', { episodeId, dramaId, clips: videos.length, title: dramaTitle })
 
@@ -87,7 +101,7 @@ export async function mergeEpisodeVideos(episodeId: number, dramaId: number, sto
   const mergeId = getInsertId(res)
 
   // 异步执行
-  doMerge(mergeId, episodeId, videos, dramaTitle).catch(async err => {
+  doMerge(mergeId, episodeId, videos, dramaTitle, episodeNumber, totalEpisodes).catch(async err => {
     logTaskError('MergeTask', 'episode-merge', { mergeId, episodeId, error: err.message })
     console.error(`[Merge] Failed:`, err)
     await db.update(schema.videoMerges)
@@ -153,22 +167,32 @@ function escFilterValue(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/,/g, '\\,')
 }
 
+/** 字幕卡单行文本：文字文件 + 字号 + 相对画面垂直居中的偏移（px，负数上移） */
+interface CardLine { file: string; fontSize: number; yOffset: number }
+
+/** 文字淡入淡出 alpha 表达式：前/后 CARD_FADE 秒渐隐、其余时间全显；表达式内逗号需转义 */
+function fadeAlpha(seconds: number, fade: number): string {
+  const expr = `if(lt(t,${fade}),t/${fade},if(gt(t,${seconds - fade}),(${seconds}-t)/${fade},1))`
+  return expr.replace(/,/g, '\\,')
+}
+
 /**
  * 生成一张黑底白字卡（片头/片尾）的 filter 片段。
- * 文字经 textfile 读取，规避 drawtext 对中文与特殊字符的转义难题。
+ * 支持主/副标题两行排版与文字淡入淡出；文字经 textfile 读取，规避 drawtext 对中文与特殊字符的转义难题。
  * 分辨率/帧率取首个镜头实际值，保证 concat 各段参数一致。
  */
-function cardFilter(textFile: string, fontFile: string, seconds: number, width: number, height: number, frameRate: string) {
-  const fontsize = Math.max(28, Math.round(height * 0.09))
-  const video = `color=c=black:s=${width}x${height}:r=${frameRate}:d=${seconds},` +
-    `drawtext=textfile=${escFilterValue(textFile)}:fontfile=${escFilterValue(fontFile)}:fontsize=${fontsize}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2,` +
-    `format=yuv420p,setpts=PTS-STARTPTS`
+function cardFilter(lines: CardLine[], fontFile: string, seconds: number, width: number, height: number, frameRate: string) {
+  const alpha = fadeAlpha(seconds, CARD_FADE_SECONDS)
+  const draws = lines.map(l =>
+    `drawtext=textfile=${escFilterValue(l.file)}:fontfile=${escFilterValue(fontFile)}:fontsize=${l.fontSize}:fontcolor=white:alpha=${alpha}:x=(w-text_w)/2:y=(h-text_h)/2+${l.yOffset}`
+  ).join(',')
+  const video = `color=c=black:s=${width}x${height}:r=${frameRate}:d=${seconds},` + draws + `,format=yuv420p,setpts=PTS-STARTPTS`
   // 与镜头音轨统一为 48kHz 立体声 fltp，保证 concat 各段格式一致
   const audio = `anullsrc=r=48000:cl=stereo:d=${seconds},aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS`
   return { video, audio }
 }
 
-async function doMerge(mergeId: number, episodeId: number, videos: string[], title?: string) {
+async function doMerge(mergeId: number, episodeId: number, videos: string[], title?: string, episodeNumber?: number, totalEpisodes?: number) {
   // 输出文件
   const outputDir = path.join(STORAGE_ROOT, 'merged')
   fs.mkdirSync(outputDir, { recursive: true })
@@ -212,12 +236,27 @@ async function doMerge(mergeId: number, episodeId: number, videos: string[], tit
 
   type Segment = { v: string; a: string; dur: number }
   const segs: Segment[] = []
-  const pushCard = (text: string, seconds: number) => {
-    const { video, audio } = cardFilter(writeTextFile(`card-${segs.length}.txt`, text), font!, seconds, cardW, cardH, cardFps)
-    segs.push({ v: video, a: audio, dur: seconds })
-  }
 
-  if (font && titleText) pushCard(titleText, TITLE_CARD_SECONDS)
+  // 片头卡：剧名大字（淡入淡出）+ 集数小字副标（仅多集时）
+  if (font && titleText) {
+    const showEpisodeNumber = (totalEpisodes ?? 1) > 1 && !!episodeNumber
+    const mainSize = Math.max(28, Math.round(cardH * TITLE_FONT_RATIO))
+    const subSize = Math.max(18, Math.round(cardH * SUBTITLE_FONT_RATIO))
+    const lines: CardLine[] = [{
+      file: writeTextFile(`card-${segs.length}-main.txt`, titleText),
+      fontSize: mainSize,
+      yOffset: showEpisodeNumber ? -Math.round(cardH * 0.06) : 0,
+    }]
+    if (showEpisodeNumber) {
+      lines.push({
+        file: writeTextFile(`card-${segs.length}-sub.txt`, `第 ${episodeNumber} 集`),
+        fontSize: subSize,
+        yOffset: Math.round(cardH * 0.11),
+      })
+    }
+    const { video, audio } = cardFilter(lines, font!, TITLE_CARD_SECONDS, cardW, cardH, cardFps)
+    segs.push({ v: video, a: audio, dur: TITLE_CARD_SECONDS })
+  }
 
   for (let i = 0; i < n; i++) {
     const dur = probes[i].videoDuration || 5
@@ -229,7 +268,15 @@ async function doMerge(mergeId: number, episodeId: number, videos: string[], tit
     segs.push({ v, a, dur })
   }
 
-  if (font) pushCard('剧终', END_CARD_SECONDS)
+  // 片尾卡：「本集完」淡入后淡出到黑，收尾不再硬切
+  if (font) {
+    const { video, audio } = cardFilter([{
+      file: writeTextFile(`card-${segs.length}.txt`, END_CARD_TEXT),
+      fontSize: Math.max(28, Math.round(cardH * TITLE_FONT_RATIO)),
+      yOffset: 0,
+    }], font!, END_CARD_SECONDS, cardW, cardH, cardFps)
+    segs.push({ v: video, a: audio, dur: END_CARD_SECONDS })
+  }
 
   const chains: string[] = []
   segs.forEach((s, i) => chains.push(`${s.v}[vseg${i}]`, `${s.a}[aseg${i}]`))
