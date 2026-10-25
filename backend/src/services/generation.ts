@@ -3,7 +3,7 @@
  * 创建(processing) → 适配器构建请求 → 同步完成或异步轮询 → 下载落盘 → 回写业务表
  */
 import { db, getInsertId, schema } from '../db/index.js'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { getActiveConfig, getConfigById } from './ai.js'
 import { now } from '../utils/response.js'
 import { downloadFile, fetchImageAsCompressedDataUrl, generateImageThumb, readImageAsCompressedDataUrl, readImageAsDataUrl, saveBase64Image } from '../utils/storage.js'
@@ -432,6 +432,67 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
     }
   }
   await failTask(record.id, 'Timeout: polling attempts exhausted')
+}
+
+/**
+ * 启动恢复：进程重启会丢失内存中的轮询线程，但已提交到上游的任务仍在生成。
+ * 有 task_id 的任务用当前 active config 恢复轮询继续等结果（provider 已变更则标失败）；
+ * 无 task_id 的任务是提交阶段被中断，无法确定上游是否收到，标失败避免重复提交。
+ */
+export async function resumeInterruptedTasks(): Promise<number> {
+  const rows = await db.select().from(schema.sysTask)
+    .where(eq(schema.sysTask.status, 'processing'))
+  let resumed = 0
+  for (const record of rows) {
+    const type = record.type as TaskType
+    if (!record.taskId) {
+      await failTask(record.id, '服务重启，生成任务在提交阶段中断，请重试')
+      continue
+    }
+    const config = await getActiveConfig(type)
+    if (config && config.provider === record.provider) {
+      pollTask(record, config, record.taskId)
+      resumed++
+      logTaskProgress(taskLabel(type), 'resume-polling', { id: record.id, taskId: record.taskId })
+    } else {
+      await failTask(record.id, '服务重启后无法恢复轮询（AI 配置已变更或缺失），请重试')
+    }
+  }
+  return resumed
+}
+
+/**
+ * 一次性恢复：把「因重启/异常被标失败」的任务重新拉起轮询（维护脚本/手动恢复用）。
+ * 与 resumeInterruptedTasks 不同——这里显式传入失败态任务 id，只对仍有 task_id
+ * 且当前 active 配置 provider 仍一致的任务恢复；其余跳过。不参与启动流程，
+ * 避免把上游已明确失败的任务反复拉起。
+ */
+export async function resumeTasks(ids: number[]): Promise<{ resumed: number; skipped: number }> {
+  const uniqueIds = Array.from(new Set(ids.filter((n) => Number.isInteger(n) && n > 0)))
+  if (!uniqueIds.length) return { resumed: 0, skipped: 0 }
+  const rows = await db.select().from(schema.sysTask).where(inArray(schema.sysTask.id, uniqueIds))
+  let resumed = 0
+  let skipped = 0
+  for (const record of rows) {
+    const type = record.type as TaskType
+    if (record.status !== 'failed' || !record.taskId) {
+      skipped++
+      continue
+    }
+    const config = await getActiveConfig(type)
+    if (config && config.provider === record.provider) {
+      await db.update(schema.sysTask)
+        .set({ status: 'processing', errorMsg: null, updatedAt: now() })
+        .where(eq(schema.sysTask.id, record.id))
+      pollTask(record, config, record.taskId)
+      resumed++
+      logTaskProgress(taskLabel(type), 'recover-polling', { id: record.id, taskId: record.taskId })
+    } else {
+      await failTask(record.id, '恢复失败：AI 配置已变更或缺失，请重试')
+      skipped++
+    }
+  }
+  return { resumed, skipped }
 }
 
 async function handleImageComplete(record: SysTaskRecord, imageUrl: string) {

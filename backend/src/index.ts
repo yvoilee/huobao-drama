@@ -24,9 +24,7 @@ import settings from './routes/settings.js'
 import storage from './routes/storage.js'
 import serverUpdate from './routes/serverUpdate.js'
 import { requestLogger, errorHandler } from './middleware/logger.js'
-import { db, schema } from './db/index.js'
-import { eq } from 'drizzle-orm'
-import { now } from './utils/response.js'
+import { resumeInterruptedTasks } from './services/generation.js'
 import { DATA_ROOT } from './utils/paths.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -88,15 +86,12 @@ app.get('*', serveStatic({ root: distPath, path: 'index.html' }))
 const port = Number(process.env.PORT || 5679)
 console.log(`🚀 Huobao Drama TS server on http://localhost:${port}`)
 
-// 进程重启后内存中的轮询线程全部丢失,残留的 processing 任务永远不会完成,
-// 启动时统一标记为 failed,避免前端一直显示"生成中"
-db.update(schema.sysTask)
-  .set({ status: 'failed', errorMsg: '服务重启，生成任务中断，请重试', updatedAt: now() })
-  .where(eq(schema.sysTask.status, 'processing'))
-  .then(res => {
-    const affected = res?.changes ?? 0
-    if (affected > 0) console.log(`🔁 已清理 ${affected} 个中断的生成任务`)
+// 进程重启会丢失内存中的轮询线程：有 task_id 的任务已提交到上游、仍可恢复轮询继续等结果；
+// 无 task_id（提交阶段被中断）的任务无法确定上游是否收到，恢复函数内部会标失败避免重复提交
+resumeInterruptedTasks()
+  .then(resumed => {
+    if (resumed > 0) console.log(`🔁 已恢复 ${resumed} 个生成任务的轮询`)
   })
-  .catch(err => console.error('清理中断任务失败:', err?.message))
+  .catch(err => console.error('恢复中断任务失败:', err?.message))
 
 serve({ fetch: app.fetch, port })
