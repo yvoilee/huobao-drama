@@ -22,7 +22,9 @@ app.post('/image', async (c) => {
 
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.m4v'])
 const VIDEO_MIME = new Set(['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'])
-const VIDEO_MAX = 50 * 1024 * 1024 // 50MB
+// 参考视频上传上限。rea-video 拆解参考片要的是完整视频（比 Seedance 多模态参考大得多），
+// 默认 500MB；可用 UPLOAD_VIDEO_MAX_BYTES 覆盖。
+const VIDEO_MAX = Number(process.env.UPLOAD_VIDEO_MAX_BYTES || 500 * 1024 * 1024)
 
 const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.aac'])
 const AUDIO_MIME = new Set(['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a', 'audio/aac'])
